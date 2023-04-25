@@ -57,6 +57,7 @@ struct Params
     unsigned int width;
     unsigned int height;
     unsigned int samples_per_launch;
+    unsigned int *seeds; 
 
     CameraInfo cam;
 

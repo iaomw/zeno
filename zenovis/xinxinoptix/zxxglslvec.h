@@ -74,6 +74,13 @@ struct vec3{
     __forceinline__ __device__ vec3 rotZ(float a) {
         return vec3(cos(a) * x - sin(a) * y, cos(a) * y + sin(a) * x, z);
     }
+
+    // __forceinline__ __device__ vec3 operator *= (vec3 s) {
+    //     return *this * s;
+    // }
+    // __forceinline__ __device__ vec3 operator *= (vec3& s) {
+    //     return *this * s;
+    // }
 };
 
 struct vec2{

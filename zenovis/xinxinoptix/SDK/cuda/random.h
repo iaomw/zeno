@@ -63,7 +63,11 @@ static __host__ __device__ __inline__ unsigned int lcg2(unsigned int &prev)
 // Generate random float in [0, 1)
 static __host__ __device__ __inline__ float rnd(unsigned int &prev)
 {
-  return ((float) lcg(prev) / (float) 0x01000000);
+  //  /* implicit mod 2^32 */
+  prev = (1103515245 * (prev) + 12345);
+  return (float)prev * (1.0f / (float)0xFFFFFFFF);
+
+  //return ((float) lcg(prev) / (float) 0x01000000);
 }
 
 static __host__ __device__ __inline__ unsigned int rot_seed( unsigned int seed, unsigned int frame )

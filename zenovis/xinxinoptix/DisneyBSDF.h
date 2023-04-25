@@ -146,14 +146,15 @@ namespace DisneyBSDF{
     }
 
     static __inline__ __device__
-    void CalculateExtinction2(vec3 albedo, vec3 radius, vec3 &sigma_t, vec3 &alpha)
+    void CalculateExtinction2(vec3 albedo, vec3 radius, vec3 &sigma_t, vec3 &sigma_s)
     {
-        vec3 r = radius;
+        vec3 r = radius; vec3 ss_alpha;
         setup_subsurface_radius(3.0, vec3(1.0f), r);
-        subsurface_random_walk_remap(albedo.x, r.x, 0, sigma_t.x, alpha.x);
-        subsurface_random_walk_remap(albedo.y, r.y, 0, sigma_t.y, alpha.y);
-        subsurface_random_walk_remap(albedo.z, r.z, 0, sigma_t.z, alpha.z);
-        //sigma_s = sigma_t * alpha;
+        subsurface_random_walk_remap(albedo.x, r.x, 0, sigma_t.x, ss_alpha.x);
+        subsurface_random_walk_remap(albedo.y, r.y, 0, sigma_t.y, ss_alpha.y);
+        subsurface_random_walk_remap(albedo.z, r.z, 0, sigma_t.z, ss_alpha.z);
+        
+        sigma_s = sigma_t * ss_alpha;
     }
 
     static __inline__ __device__
@@ -899,18 +900,15 @@ namespace DisneyBSDF{
         vec3 scalerSS = sssColor * sssParam;
         
         RadiancePRD* prd = getPRD();
-        prd->ss_alpha = color;
 
         flag = scatterEvent;
-        
+        float ptotal = 1.0f + subsurface ;
         vec3 fr = abs(vec3(1.0) - 0.5 * BRDFBasics::fresnelSchlick(color, abs(NoV)));
         //printf("fr: %f, %f, %f\n", fr.x, fr.y, fr.z);
-        float w = max(dot(fr, vec3(1.0f,1.0f,1.0f)) , 0.0f);
-        float p_in = subsurface * w;
+        float w = clamp(dot(fr, vec3(1.0f,1.0f,1.0f)) / 3.0f, 0.0f, 1.0f);
         //printf("w: %f\n", w);
-
-        float ptotal = 1.0f + p_in ;
-        float psss = subsurface>0? p_in/ptotal : 0; // /ptotal;
+        
+        float psss = subsurface>0? w : 0; // /ptotal;
         float prnd = rnd(seed);
         //printf("weight: %f, rnd: %f\n", weight,prnd);
         bool trans = false;
@@ -926,9 +924,9 @@ namespace DisneyBSDF{
                     flag = transmissionEvent;
                     medium = PhaseFunctions::isotropic;
                     //extinction = CalculateExtinction(scalerSS, scatterDistance);
-                    CalculateExtinction2(color, sssRadius, prd->sigma_t, prd->ss_alpha);
+                    CalculateExtinction2(color, sssRadius, prd->sigma_t, prd->sigma_s);
                     color = vec3(1.0);
-                    //color = vec3(0.99f);
+                    //color = vec3(1.0f);
                     //color = baseColor;
                 }
             } else {
@@ -950,7 +948,7 @@ namespace DisneyBSDF{
                     medium = PhaseFunctions::decideLate;
                     //extinction = CalculateExtinction(scalerSS, scatterDistance);
                     //CalculateExtinction2(color, sssRadius, prd->sigma_t, prd->ss_alpha);
-                    color = vec3(1.0f);//no attenuation happen
+                    color = vec3(1.0);//no attenuation happen
                 }
             }else
             {
@@ -964,7 +962,7 @@ namespace DisneyBSDF{
         if(wi.z<0)
             diff = 1.0;
         
-        reflectance = ( sheen + color * (trans? 1.0 : diff));
+        reflectance = ( sheen + color * (trans? 1.0 : diff));// * ptotal;
         //fPdf = abs(NoL) * pdf;
         //rPdf = abs(NoV) * pdf;
         Onb  tbn = Onb(N);
@@ -998,21 +996,20 @@ namespace DisneyBSDF{
     }
 
     static __inline__ __device__
-    vec3 sss_rw_pdf(const vec3& sigma_t, float t, bool hit, vec3& transmittance)
+    vec3 sss_rw_pdf(const vec3& sigma_t, float t, bool hitEdge, vec3& transmittance)
     {
         vec3 T = Transmission(sigma_t, t);
         transmittance = T;
-        return hit? T : (sigma_t * T);
+        return hitEdge? T : (sigma_t * T);
     }
 
     static __inline__ __device__
-    vec3 Transmission2(const vec3& sigma_s, const vec3& sigma_t, const vec3& channelPDF, float t, bool hit)
+    vec3 Transmission2(const vec3& sigma_s, const vec3& sigma_t, const vec3& channelPDF, float t, bool hitEdge)
     {
         vec3 transmittance;
-        vec3 pdf = sss_rw_pdf(sigma_t, t, hit, transmittance);
-
-        //printf("trans PDf= %f %f %f sigma_t= %f %f %f \n", pdf.x, pdf.y, pdf.z, sigma_t.x, sigma_t.y, sigma_t.z);
-        auto result = (hit? transmittance : (sigma_s * transmittance)) / (dot(pdf, channelPDF) + 1e-8);
+        vec3 pdf = sss_rw_pdf(sigma_t, t, hitEdge, transmittance);
+        
+        auto result = (hitEdge? transmittance : (sigma_s * transmittance)) / (dot(pdf, channelPDF) + 1e-8);
         return result;
     }
 

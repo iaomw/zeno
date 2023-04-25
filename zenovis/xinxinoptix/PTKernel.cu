@@ -78,6 +78,9 @@ extern "C" __global__ void __raygen__rg()
     float3 result = make_float3( 0.0f );
     int i = params.samples_per_launch;
 
+    seed = params.seeds[idx.y*w + idx.x];
+    //printf("seed= %u \n", params.seeds[idx.y*w + idx.x]);
+
     do
     {
         // The center of each pixel is at fraction (0.5,0.5)
@@ -149,19 +152,6 @@ extern "C" __global__ void __raygen__rg()
             ray_mask = prd._mask_; 
             prd._mask_ = EverythingMask;
 
-//            vec3 radiance = vec3(prd.radiance);
-//            vec3 oldradiance = radiance;
-//            RadiancePRD shadow_prd;
-//            shadow_prd.depth = prd.depth;
-//            shadow_prd.shadowAttanuation = make_float3(1.0f, 1.0f, 1.0f);
-//            shadow_prd.nonThinTransHit = prd.nonThinTransHit;
-//            traceOcclusion(params.handle, prd.LP, prd.Ldir,
-//                           1e-5f, // tmin
-//                           1e16f, // tmax,
-//                           &shadow_prd);
-//            radiance = radiance * prd.Lweight * vec3(shadow_prd.shadowAttanuation);
-//            radiance = radiance + vec3(prd.emission);
-
 //            prd.radiance = float3(mix(oldradiance, radiance, prd.CH));
 
             // if (prd.bad) {
@@ -211,6 +201,7 @@ extern "C" __global__ void __raygen__rg()
                 //prd.passed = false;
             //}
         }
+        seed = prd.seed;
     }
     while( --i );
 
@@ -225,14 +216,11 @@ extern "C" __global__ void __raygen__rg()
         accum_color = lerp( accum_color_prev, accum_color, a );
     }
 
-    /*if (launch_index.x == 0) {*/
-        /*printf("%p\n", params.accum_buffer);*/
-        /*printf("%p\n", params.frame_buffer);*/
-    /*}*/
     params.accum_buffer[ image_index ] = make_float4( accum_color, 1.0f);
     //vec3 aecs_fitted = ACESFitted(vec3(accum_color), 2.2);
     float3 out_color = accum_color;
     params.frame_buffer[ image_index ] = make_color ( out_color );
+    params.seeds[idx.y*w + idx.x] = seed;
 }
 
 extern "C" __global__ void __miss__radiance()
@@ -263,15 +251,15 @@ extern "C" __global__ void __miss__radiance()
         return;
     }
 
-    vec3 transmittance = DisneyBSDF::Transmission2(prd->sigma_s(), prd->sigma_t, prd->channelPDF, optixGetRayTmax(), false);
+    float distance = prd->takeCombinedDistanceSSS();
+
+    vec3 transmittance = DisneyBSDF::Transmission2(prd->sigma_s, prd->sigma_t, prd->channelPDF, distance, false);
     prd->attenuation *= transmittance;//DisneyBSDF::Transmission(prd->extinction,optixGetRayTmax());
     prd->attenuation2 *= transmittance;//DisneyBSDF::Transmission(prd->extinction,optixGetRayTmax());
     prd->origin += prd->direction * optixGetRayTmax();
     prd->direction = DisneyBSDF::SampleScatterDirection(prd->seed);
-
-    vec3 channelPDF = vec3(1.0/3.0);
-    prd->maxDistance = DisneyBSDF::SampleDistance2(prd->seed, vec3(prd->attenuation) * prd->ss_alpha, prd->sigma_t, channelPDF);
-    prd->channelPDF= channelPDF;
+    //prd->channelPDF = vec3(1.0/3.0);
+    prd->maxDistance = DisneyBSDF::SampleDistance2(prd->seed, vec3(prd->attenuation) * prd->ss_alpha(), prd->sigma_t, prd->channelPDF);
     prd->depth++;
 
     if(length(prd->attenuation)<1e-7f){

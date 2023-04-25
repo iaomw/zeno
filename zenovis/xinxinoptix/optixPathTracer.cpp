@@ -196,6 +196,8 @@ struct PathTracerState
     raii<CUstream>                       stream;
     raii<CUdeviceptr> accum_buffer_p;
     raii<CUdeviceptr> lightsbuf_p;
+    raii<CUdeviceptr> seeds_p;
+
     Params                         params;
     raii<CUdeviceptr>                        d_params;
     CUdeviceptr                              d_params2=0;
@@ -445,6 +447,27 @@ static void initLaunchParams( PathTracerState& state )
 
     //state.params.samples_per_launch = samples_per_launch;
     state.params.subframe_index     = 0u;
+
+    auto pixel_cout = state.params.width * state.params.height;
+    auto men_size = pixel_cout * sizeof( unsigned int );
+
+    CUDA_CHECK( cudaMalloc(
+                reinterpret_cast<void**>( &state.seeds_p.reset() ),
+                men_size
+                ) );
+
+    std::vector<unsigned int> seeds_cpu( pixel_cout );
+
+    tbb::task_group _seeds_group;
+        for (uint i=0; i<pixel_cout; ++i) {
+            _seeds_group.run([&seeds_cpu, i]{
+                seeds_cpu[i] = rand();
+            });
+        }
+    _seeds_group.wait();
+
+    CUDA_CHECK( cudaMemcpy((void**)state.seeds_p.handle, seeds_cpu.data(), men_size, cudaMemcpyHostToDevice) );
+    state.params.seeds = (unsigned int *)(CUdeviceptr)state.seeds_p;
 }
 
 
@@ -480,6 +503,27 @@ static void handleResize( sutil::CUDAOutputBuffer<uchar4>& output_buffer, Params
                 ) );
     state.params.accum_buffer = (float4*)(CUdeviceptr)state.accum_buffer_p;
     state.params.subframe_index = 0;
+
+    auto pixel_cout = state.params.width * state.params.height;
+    auto men_size = pixel_cout * sizeof( unsigned int );
+
+    CUDA_CHECK( cudaMalloc(
+                reinterpret_cast<void**>( &state.seeds_p.reset() ),
+                men_size
+                ) );
+
+    std::vector<unsigned int> seeds_cpu( pixel_cout );
+
+    tbb::task_group _seeds_group;
+        for (uint i=0; i<pixel_cout; ++i) {
+            _seeds_group.run([&seeds_cpu, i]{
+                seeds_cpu[i] = rand();
+            });
+        }
+    _seeds_group.wait();
+
+    CUDA_CHECK( cudaMemcpy((void**)state.seeds_p.handle, seeds_cpu.data(), men_size, cudaMemcpyHostToDevice) );
+    state.params.seeds = (unsigned int *)(CUdeviceptr)state.seeds_p;
 }
 
 

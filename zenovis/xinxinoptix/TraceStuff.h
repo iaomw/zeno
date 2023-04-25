@@ -3,6 +3,7 @@
 #include <optix.h>
 #include "optixPathTracer.h"
 #include "zxxglslvec.h"
+#include <math_constants.h>
 
 #define _FLT_EPL_ 1.19209290e-7F
 
@@ -87,9 +88,9 @@ struct RadiancePRD
     float3       LP;
     float3       Ldir;
     float        Lweight;
-    vec3         sigma_t_queue[8];
-    vec3         ss_alpha_queue[8];
-    int          curMatIdx;
+    vec3         sigma_s_queue[8]{};
+    vec3         sigma_t_queue[8]{};
+    int          curMatIdx = 0;
     vec3 extinction() {
         auto idx = clamp(curMatIdx, 0, 7);
         return sigma_t_queue[idx];
@@ -97,13 +98,28 @@ struct RadiancePRD
     float        CH;
 
     //cihou SS
-    vec3 sigma_t;
-    vec3 ss_alpha;
-
-    vec3 sigma_s() {
-        return sigma_t * ss_alpha;
+    float distanceSSS = 0; // accumulate that vaule when you need ignore intersection point inside SSS object
+    void accumulateDistanceSSS(float t) {
+        distanceSSS += t;
     }
-    vec3 channelPDF;
+    void takeAccumulatedDistanceSSS(float& t) {
+        t = distanceSSS;
+        distanceSSS = 0;
+    }
+    float takeCombinedDistanceSSS(float delta=optixGetRayTmax()) {
+        float t = distanceSSS + delta;
+        distanceSSS = 0;
+        return t;
+    }
+
+    vec3 sigma_s = vec3(-CUDART_INF_F);
+    vec3 sigma_t = vec3(-CUDART_INF_F);
+
+    vec3 ss_alpha() {
+        vec3 alpha = sigma_s / sigma_t;
+        return clamp(alpha, vec3(0.0f), vec3(1.0f));
+    }
+    vec3 channelPDF = vec3(1.0f/3.0f);
 
     bool bad = false;
 
@@ -141,34 +157,34 @@ struct RadiancePRD
         attenuation *= multiplier;
     }
     
-    int pushMat(vec3 extinction, vec3 ss_alpha = vec3(1.0f))
+    int pushMat(vec3 sigma_t, vec3 sigma_s = vec3(-_FLT_MAX_))
     {
-        vec3 d = abs(sigma_t_queue[curMatIdx] - extinction);
+        vec3 d = abs(sigma_t_queue[curMatIdx] - sigma_t);
         float c = dot(d, vec3(1,1,1));
-        if(curMatIdx<=7 && c > 1e-6 )
+        if(curMatIdx<7)
         {
-            
-            sigma_t_queue[curMatIdx] = extinction;
-            ss_alpha_queue[curMatIdx] = ss_alpha;
             curMatIdx++;
+            sigma_t_queue[curMatIdx] = sigma_t;
+            sigma_s_queue[curMatIdx] = sigma_s;
         }
 
         return curMatIdx;
     }
 
-    void readMat(vec3& sigma_t, vec3& ss_alpha) {
+    void readMat(vec3& sigma_t, vec3& sigma_s) {
 
         auto idx = clamp(curMatIdx, 0, 7);
 
         sigma_t = sigma_t_queue[idx];
-        ss_alpha = ss_alpha_queue[idx];
+        sigma_s = sigma_s_queue[idx];
     }
 
-    int popMat(vec3& sigma_t, vec3& ss_alpha)
+    int popMat(vec3& sigma_t, vec3& sigma_s)
     {
         sigma_t = sigma_t_queue[curMatIdx];
-        ss_alpha = ss_alpha_queue[curMatIdx];
-        curMatIdx = clamp(--curMatIdx, 0, 7);
+        sigma_s = sigma_s_queue[curMatIdx];
+
+        curMatIdx = clamp(curMatIdx-1, 0, 6);
         return curMatIdx;
     }
     
